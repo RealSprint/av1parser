@@ -92,6 +92,25 @@ impl<R: io::Read> BitReader<R> {
         Some((v << 1) - m + extra_bit)
     }
 
+    pub fn uvlc(&mut self) -> Option<u64> {
+        let mut leading_zeros = 0;
+        loop {
+            let done = self.read_bit()? > 0;
+            if done {
+                break;
+            }
+            leading_zeros += 1;
+        }
+
+        if leading_zeros >= 32 {
+            return Some((1 << 32) - 1);
+        }
+
+        let value = self.f::<u64>(leading_zeros as usize)?;
+
+        Some(value + (1 << leading_zeros) - 1)
+    }
+
     // FloorLog2(x)
     fn floor_log2(mut x: u32) -> u32 {
         let mut s = 0;

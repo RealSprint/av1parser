@@ -208,7 +208,7 @@ pub struct AV1CodecConfigurationBox {
     pub config_obus: Vec<u8>,                     // ui(8)[]
 }
 
-fn read_av1codecconfig<R: io::Read>(
+pub fn read_av1codecconfig<R: io::Read>(
     mut reader: R,
     payload_size: u64,
 ) -> io::Result<AV1CodecConfigurationBox> {

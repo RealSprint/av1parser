@@ -649,8 +649,7 @@ fn parse_timing_info<R: io::Read>(br: &mut BitReader<R>) -> Option<TimingInfo> {
     ti.time_scale = br.f::<u32>(32)?; // f(32)
     ti.equal_picture_interval = br.f::<bool>(1)?; // f(1)
     if ti.equal_picture_interval {
-        ti.num_ticks_per_picture = 0 + 1; // uvlc()
-        unimplemented!("uvlc() for num_ticks_per_picture_minus_1");
+        ti.num_ticks_per_picture = br.uvlc()? as u32 + 1;
     }
 
     Some(ti)
