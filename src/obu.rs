@@ -1828,7 +1828,10 @@ pub fn parse_frame_header<R: io::Read>(
         if fh.show_existing_frame {
             fh.frame_to_show_map_idx = br.f::<u8>(3)?; // f(3)
             if sh.decoder_model_info_present_flag && !sh.timing_info.equal_picture_interval {
-                unimplemented!("temporal_point_info()");
+                if let Some(ref decoder_model_info) = sh.decoder_model_info {
+                    let _frame_presentation_time =
+                        br.f::<u32>(decoder_model_info.frame_presentation_time_length as usize)?;
+                }
             }
             fh.refresh_frame_flags = 0;
             if sh.frame_id_numbers_present_flag {
@@ -1850,7 +1853,10 @@ pub fn parse_frame_header<R: io::Read>(
             && sh.decoder_model_info_present_flag
             && !sh.timing_info.equal_picture_interval
         {
-            unimplemented!("temporal_point_info()");
+            if let Some(ref decoder_model_info) = sh.decoder_model_info {
+                let _frame_presentation_time =
+                    br.f::<u32>(decoder_model_info.frame_presentation_time_length as usize)?;
+            }
         }
         if fh.show_frame {
             fh.showable_frame = fh.frame_type != KEY_FRAME;
@@ -1909,9 +1915,6 @@ pub fn parse_frame_header<R: io::Read>(
         fh.primary_ref_frame = PRIMARY_REF_NONE;
     } else {
         fh.primary_ref_frame = br.f::<u8>(3)?; // f(3)
-    }
-    if sh.decoder_model_info_present_flag {
-        unimplemented!("decoder_model_info_present_flag==1");
     }
     fh.allow_high_precision_mv = false;
     fh.use_ref_frame_mvs = false;
