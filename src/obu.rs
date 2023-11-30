@@ -1682,7 +1682,6 @@ pub fn parse_sequence_header<R: io::Read>(bs: &mut R) -> Option<SequenceHeader> 
         }
         sh.initial_display_delay_present_flag = br.f::<bool>(1)?; // f(1)
         sh.operating_points_cnt = br.f::<u8>(5)? + 1; // f(5)
-        assert_eq!(sh.operating_points_cnt, 1); // FIXME: support single operating point
         for i in 0..(sh.operating_points_cnt) as usize {
             sh.op[i].operating_point_idc = br.f::<u16>(12)?; // f(12)
             sh.op[i].seq_level_idx = br.f::<u8>(5)?; // f(5)
