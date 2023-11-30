@@ -178,20 +178,29 @@ pub struct OperatingPoint {
     pub seq_tier: u8,             // f(1)
 }
 
+#[derive(Clone, Copy, Debug, Default)]
+pub struct DecoderModelInfo {
+    buffer_delay_length: u8,
+    num_units_in_decoding_tick: u32,
+    buffer_removal_time: u8,
+    frame_presentation_time_length: u8,
+}
+
 ///
 /// Sequence header OBU
 ///
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct SequenceHeader {
-    pub seq_profile: u8,                          // f(3)
-    pub still_picture: bool,                      // f(1)
-    pub reduced_still_picture_header: bool,       // f(1)
-    pub timing_info_present_flag: bool,           // f(1)
-    pub timing_info: TimingInfo,                  // timing_info()
-    pub decoder_model_info_present_flag: bool,    // f(1)
+    pub seq_profile: u8,                       // f(3)
+    pub still_picture: bool,                   // f(1)
+    pub reduced_still_picture_header: bool,    // f(1)
+    pub timing_info_present_flag: bool,        // f(1)
+    pub timing_info: TimingInfo,               // timing_info()
+    pub decoder_model_info_present_flag: bool, // f(1)
+    pub decoder_model_info: Option<DecoderModelInfo>,
     pub initial_display_delay_present_flag: bool, // f(1)
     pub operating_points_cnt: u8,                 // f(5)
-    pub op: [OperatingPoint; 1],                  // OperatingPoint
+    pub op: Vec<OperatingPoint>,                  // OperatingPoint
     pub frame_width_bits: u8,                     // f(4)
     pub frame_height_bits: u8,                    // f(4)
     pub max_frame_width: u32,                     // f(n)
@@ -1658,6 +1667,7 @@ pub fn parse_sequence_header<R: io::Read>(bs: &mut R) -> Option<SequenceHeader> 
     sh.seq_profile = br.f::<u8>(3)?; // f(3)
     sh.still_picture = br.f::<bool>(1)?; // f(1)
     sh.reduced_still_picture_header = br.f::<bool>(1)?; // f(1)
+    sh.op.push(Default::default());
     if sh.reduced_still_picture_header {
         sh.timing_info_present_flag = false;
         sh.decoder_model_info_present_flag = false;
@@ -1675,14 +1685,24 @@ pub fn parse_sequence_header<R: io::Read>(bs: &mut R) -> Option<SequenceHeader> 
             sh.timing_info = parse_timing_info(&mut br)?; // timing_info()
             sh.decoder_model_info_present_flag = br.f::<bool>(1)?; // f(1)
             if sh.decoder_model_info_present_flag {
-                unimplemented!("decoder_model_info()");
+                let buffer_delay_length = br.f::<u8>(5)? + 1;
+                let num_units_in_decoding_tick = br.f::<u32>(32)?;
+                let buffer_removal_time = br.f::<u8>(5)? + 1;
+                let frame_presentation_time_length = br.f::<u8>(5)? + 1;
+                sh.decoder_model_info = Some(DecoderModelInfo {
+                    buffer_delay_length,
+                    num_units_in_decoding_tick,
+                    buffer_removal_time,
+                    frame_presentation_time_length,
+                });
             }
         } else {
             sh.decoder_model_info_present_flag = false;
         }
         sh.initial_display_delay_present_flag = br.f::<bool>(1)?; // f(1)
         sh.operating_points_cnt = br.f::<u8>(5)? + 1; // f(5)
-        assert_eq!(sh.operating_points_cnt, 1); // FIXME: support single operating point
+        sh.op
+            .resize_with(sh.operating_points_cnt as usize, Default::default);
         for i in 0..(sh.operating_points_cnt) as usize {
             sh.op[i].operating_point_idc = br.f::<u16>(12)?; // f(12)
             sh.op[i].seq_level_idx = br.f::<u8>(5)?; // f(5)
@@ -1691,11 +1711,18 @@ pub fn parse_sequence_header<R: io::Read>(bs: &mut R) -> Option<SequenceHeader> 
             } else {
                 sh.op[i].seq_tier = 0;
             }
-            if sh.decoder_model_info_present_flag {
-                unimplemented!("decoder_model_info_present_flag==1");
+            if let Some(ref decoder_model_info) = sh.decoder_model_info {
+                if br.f::<bool>(1)? {
+                    let n = decoder_model_info.buffer_delay_length;
+                    let _decoder_delay = br.f::<u32>(n as usize);
+                    let _encoder_delay = br.f::<u32>(n as usize);
+                    let _low_delay_mode = br.f::<bool>(1);
+                }
             }
             if sh.initial_display_delay_present_flag {
-                unimplemented!("initial_display_delay_present_flag==1");
+                if br.f::<bool>(1)? {
+                    let _delay = br.f::<u8>(4)?;
+                }
             }
         }
     }
@@ -1804,7 +1831,10 @@ pub fn parse_frame_header<R: io::Read>(
         if fh.show_existing_frame {
             fh.frame_to_show_map_idx = br.f::<u8>(3)?; // f(3)
             if sh.decoder_model_info_present_flag && !sh.timing_info.equal_picture_interval {
-                unimplemented!("temporal_point_info()");
+                if let Some(ref decoder_model_info) = sh.decoder_model_info {
+                    let _frame_presentation_time =
+                        br.f::<u32>(decoder_model_info.frame_presentation_time_length as usize)?;
+                }
             }
             fh.refresh_frame_flags = 0;
             if sh.frame_id_numbers_present_flag {
@@ -1826,7 +1856,10 @@ pub fn parse_frame_header<R: io::Read>(
             && sh.decoder_model_info_present_flag
             && !sh.timing_info.equal_picture_interval
         {
-            unimplemented!("temporal_point_info()");
+            if let Some(ref decoder_model_info) = sh.decoder_model_info {
+                let _frame_presentation_time =
+                    br.f::<u32>(decoder_model_info.frame_presentation_time_length as usize)?;
+            }
         }
         if fh.show_frame {
             fh.showable_frame = fh.frame_type != KEY_FRAME;
@@ -1885,9 +1918,6 @@ pub fn parse_frame_header<R: io::Read>(
         fh.primary_ref_frame = PRIMARY_REF_NONE;
     } else {
         fh.primary_ref_frame = br.f::<u8>(3)?; // f(3)
-    }
-    if sh.decoder_model_info_present_flag {
-        unimplemented!("decoder_model_info_present_flag==1");
     }
     fh.allow_high_precision_mv = false;
     fh.use_ref_frame_mvs = false;
