@@ -189,7 +189,7 @@ pub struct DecoderModelInfo {
 ///
 /// Sequence header OBU
 ///
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct SequenceHeader {
     pub seq_profile: u8,                       // f(3)
     pub still_picture: bool,                   // f(1)
@@ -200,7 +200,7 @@ pub struct SequenceHeader {
     pub decoder_model_info: Option<DecoderModelInfo>,
     pub initial_display_delay_present_flag: bool, // f(1)
     pub operating_points_cnt: u8,                 // f(5)
-    pub op: [OperatingPoint; 1],                  // OperatingPoint
+    pub op: Vec<OperatingPoint>,                  // OperatingPoint
     pub frame_width_bits: u8,                     // f(4)
     pub frame_height_bits: u8,                    // f(4)
     pub max_frame_width: u32,                     // f(n)
@@ -1667,6 +1667,7 @@ pub fn parse_sequence_header<R: io::Read>(bs: &mut R) -> Option<SequenceHeader> 
     sh.seq_profile = br.f::<u8>(3)?; // f(3)
     sh.still_picture = br.f::<bool>(1)?; // f(1)
     sh.reduced_still_picture_header = br.f::<bool>(1)?; // f(1)
+    sh.op.push(Default::default());
     if sh.reduced_still_picture_header {
         sh.timing_info_present_flag = false;
         sh.decoder_model_info_present_flag = false;
@@ -1700,6 +1701,8 @@ pub fn parse_sequence_header<R: io::Read>(bs: &mut R) -> Option<SequenceHeader> 
         }
         sh.initial_display_delay_present_flag = br.f::<bool>(1)?; // f(1)
         sh.operating_points_cnt = br.f::<u8>(5)? + 1; // f(5)
+        sh.op
+            .resize_with(sh.operating_points_cnt as usize, Default::default);
         for i in 0..(sh.operating_points_cnt) as usize {
             sh.op[i].operating_point_idc = br.f::<u16>(12)?; // f(12)
             sh.op[i].seq_level_idx = br.f::<u8>(5)?; // f(5)
