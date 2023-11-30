@@ -1695,7 +1695,9 @@ pub fn parse_sequence_header<R: io::Read>(bs: &mut R) -> Option<SequenceHeader> 
                 unimplemented!("decoder_model_info_present_flag==1");
             }
             if sh.initial_display_delay_present_flag {
-                unimplemented!("initial_display_delay_present_flag==1");
+                if br.f::<bool>(1)? {
+                    let _delay = br.f::<u8>(4)?;
+                }
             }
         }
     }
