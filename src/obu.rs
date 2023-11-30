@@ -178,17 +178,26 @@ pub struct OperatingPoint {
     pub seq_tier: u8,             // f(1)
 }
 
+#[derive(Clone, Copy, Debug, Default)]
+pub struct DecoderModelInfo {
+    buffer_delay_length: u8,
+    num_units_in_decoding_tick: u32,
+    buffer_removal_time: u8,
+    frame_presentation_time_length: u8,
+}
+
 ///
 /// Sequence header OBU
 ///
 #[derive(Clone, Copy, Debug, Default)]
 pub struct SequenceHeader {
-    pub seq_profile: u8,                          // f(3)
-    pub still_picture: bool,                      // f(1)
-    pub reduced_still_picture_header: bool,       // f(1)
-    pub timing_info_present_flag: bool,           // f(1)
-    pub timing_info: TimingInfo,                  // timing_info()
-    pub decoder_model_info_present_flag: bool,    // f(1)
+    pub seq_profile: u8,                       // f(3)
+    pub still_picture: bool,                   // f(1)
+    pub reduced_still_picture_header: bool,    // f(1)
+    pub timing_info_present_flag: bool,        // f(1)
+    pub timing_info: TimingInfo,               // timing_info()
+    pub decoder_model_info_present_flag: bool, // f(1)
+    pub decoder_model_info: Option<DecoderModelInfo>,
     pub initial_display_delay_present_flag: bool, // f(1)
     pub operating_points_cnt: u8,                 // f(5)
     pub op: [OperatingPoint; 1],                  // OperatingPoint
@@ -1675,7 +1684,16 @@ pub fn parse_sequence_header<R: io::Read>(bs: &mut R) -> Option<SequenceHeader> 
             sh.timing_info = parse_timing_info(&mut br)?; // timing_info()
             sh.decoder_model_info_present_flag = br.f::<bool>(1)?; // f(1)
             if sh.decoder_model_info_present_flag {
-                unimplemented!("decoder_model_info()");
+                let buffer_delay_length = br.f::<u8>(5)? + 1;
+                let num_units_in_decoding_tick = br.f::<u32>(32)?;
+                let buffer_removal_time = br.f::<u8>(5)? + 1;
+                let frame_presentation_time_length = br.f::<u8>(5)? + 1;
+                sh.decoder_model_info = Some(DecoderModelInfo {
+                    buffer_delay_length,
+                    num_units_in_decoding_tick,
+                    buffer_removal_time,
+                    frame_presentation_time_length,
+                });
             }
         } else {
             sh.decoder_model_info_present_flag = false;
@@ -1690,8 +1708,13 @@ pub fn parse_sequence_header<R: io::Read>(bs: &mut R) -> Option<SequenceHeader> 
             } else {
                 sh.op[i].seq_tier = 0;
             }
-            if sh.decoder_model_info_present_flag {
-                unimplemented!("decoder_model_info_present_flag==1");
+            if let Some(ref decoder_model_info) = sh.decoder_model_info {
+                if br.f::<bool>(1)? {
+                    let n = decoder_model_info.buffer_delay_length;
+                    let _decoder_delay = br.f::<u32>(n as usize);
+                    let _encoder_delay = br.f::<u32>(n as usize);
+                    let _low_delay_mode = br.f::<bool>(1);
+                }
             }
             if sh.initial_display_delay_present_flag {
                 if br.f::<bool>(1)? {
