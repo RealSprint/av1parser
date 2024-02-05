@@ -180,10 +180,10 @@ pub struct OperatingPoint {
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct DecoderModelInfo {
-    buffer_delay_length: u8,
-    num_units_in_decoding_tick: u32,
-    buffer_removal_time: u8,
-    frame_presentation_time_length: u8,
+    pub buffer_delay_length: u8,
+    pub num_units_in_decoding_tick: u32,
+    pub buffer_removal_time: u8,
+    pub frame_presentation_time_length: u8,
 }
 
 ///
