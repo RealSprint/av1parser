@@ -538,7 +538,7 @@ fn compute_image_size(fs: &FrameSize) -> (u32, u32) {
 }
 
 /// return (Leb128Bytes, leb128())
-fn leb128<R: io::Read>(bs: &mut R) -> io::Result<(u32, u32)> {
+pub fn leb128<R: io::Read>(bs: &mut R) -> io::Result<(u32, u32)> {
     let mut value: u64 = 0;
     let mut leb128bytes = 0;
     for i in 0..8 {
@@ -551,7 +551,13 @@ fn leb128<R: io::Read>(bs: &mut R) -> io::Result<(u32, u32)> {
             break;
         }
     }
-    assert!(value < (1u64 << 32));
+    debug_assert!(value < (1u64 << 32));
+    if value < (1u64 << 32) {
+        return Err(std::io::Error::new(
+            io::ErrorKind::InvalidData,
+            "leb128() value is too large to fit in u32",
+        ));
+    }
     Ok((leb128bytes, value as u32))
 }
 
