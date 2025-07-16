@@ -551,8 +551,7 @@ pub fn leb128<R: io::Read>(bs: &mut R) -> io::Result<(u32, u32)> {
             break;
         }
     }
-    debug_assert!(value < (1u64 << 32));
-    if value < (1u64 << 32) {
+    if value > (1u64 << 32) - 1 {
         return Err(std::io::Error::new(
             io::ErrorKind::InvalidData,
             "leb128() value is too large to fit in u32",
