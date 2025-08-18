@@ -1,3 +1,5 @@
+#![allow(clippy::collapsible_else_if, clippy::collapsible_if)]
+
 //
 // https://aomedia.org/av1-bitstream-and-decoding-process-specification/
 //
@@ -5,7 +7,56 @@ use crate::av1;
 use crate::bitio::BitReader;
 use std::cmp;
 use std::fmt;
+use std::fmt::Display;
 use std::io;
+use std::io::Seek;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ObuType {
+    SequenceHeader,
+    TemporalDelimiter,
+    FrameHeader,
+    TileGroup,
+    Metadata,
+    Frame,
+    RedundantFrameHeader,
+    TileList,
+    Padding,
+}
+
+impl ObuType {
+    pub fn from_u8(value: u8) -> Option<Self> {
+        match value {
+            OBU_SEQUENCE_HEADER => Some(ObuType::SequenceHeader),
+            OBU_TEMPORAL_DELIMITER => Some(ObuType::TemporalDelimiter),
+            OBU_FRAME_HEADER => Some(ObuType::FrameHeader),
+            OBU_TILE_GROUP => Some(ObuType::TileGroup),
+            OBU_METADATA => Some(ObuType::Metadata),
+            OBU_FRAME => Some(ObuType::Frame),
+            OBU_REDUNDANT_FRAME_HEADER => Some(ObuType::RedundantFrameHeader),
+            OBU_TILE_LIST => Some(ObuType::TileList),
+            OBU_PADDING => Some(ObuType::Padding),
+            _ => None,
+        }
+    }
+}
+
+impl Display for ObuType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let name = match self {
+            ObuType::SequenceHeader => "Sequence Header",
+            ObuType::TemporalDelimiter => "Temporal Delimiter",
+            ObuType::FrameHeader => "Frame Header",
+            ObuType::TileGroup => "Tile Group",
+            ObuType::Metadata => "Metadata",
+            ObuType::Frame => "Frame",
+            ObuType::RedundantFrameHeader => "Redundant Frame Header",
+            ObuType::TileList => "Tile List",
+            ObuType::Padding => "Padding",
+        };
+        write!(f, "{name}")
+    }
+}
 
 pub const OBU_SEQUENCE_HEADER: u8 = 1;
 pub const OBU_TEMPORAL_DELIMITER: u8 = 2;
@@ -173,16 +224,18 @@ pub struct TimingInfo {
 ///
 #[derive(Clone, Copy, Debug, Default)]
 pub struct OperatingPoint {
-    pub operating_point_idc: u16, // f(12)
-    pub seq_level_idx: u8,        // f(5)
-    pub seq_tier: u8,             // f(1)
+    pub operating_point_idc: u16,                        // f(12)
+    pub seq_level_idx: u8,                               // f(5)
+    pub seq_tier: u8,                                    // f(1)
+    pub decoder_model_present_for_this_op: bool,         // f(1)
+    pub initial_display_delay_present_for_this_op: bool, // f(1)
 }
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct DecoderModelInfo {
     pub buffer_delay_length: u8,
     pub num_units_in_decoding_tick: u32,
-    pub buffer_removal_time: u8,
+    pub buffer_removal_time_length: u8,
     pub frame_presentation_time_length: u8,
 }
 
@@ -229,7 +282,7 @@ pub struct SequenceHeader {
 }
 
 /// Frame size
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct FrameSize {
     // frame_size()
     pub frame_width: u32,  // FrameWidth
@@ -240,7 +293,7 @@ pub struct FrameSize {
 }
 
 /// Render size
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct RenderSize {
     // render_size()
     pub render_width: u32,  // RenderWidth
@@ -248,7 +301,7 @@ pub struct RenderSize {
 }
 
 /// Loop filter params
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct LoopFilterParams {
     // loop_filter_params()
     pub loop_filter_level: [u8; 4],                          // f(6)
@@ -269,7 +322,7 @@ pub struct TileInfo {
 }
 
 /// Quantization params
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct QuantizationParams {
     pub deltaq_y_dc: i32, // DeltaQYDc
     pub deltaq_u_dc: i32, // DeltaQUDc
@@ -285,7 +338,7 @@ pub struct QuantizationParams {
 }
 
 /// Segmentation params
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct SegmentationParams {
     // segmentation_params()
     pub segmentation_enabled: bool,         // f(1)
@@ -295,7 +348,7 @@ pub struct SegmentationParams {
 }
 
 /// Quantizer index delta parameters
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct DeltaQParams {
     // delta_q_params()
     pub delta_q_present: bool, // f(1)
@@ -303,7 +356,7 @@ pub struct DeltaQParams {
 }
 
 /// Loop filter delta parameters
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct DeltaLfParams {
     // delta_lf_params()
     pub delta_lf_present: bool, // f(1)
@@ -312,7 +365,7 @@ pub struct DeltaLfParams {
 }
 
 /// CDEF params
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct CdefParams {
     // cdef_params()
     pub cdef_damping: u8,              // f(2)
@@ -324,7 +377,7 @@ pub struct CdefParams {
 }
 
 /// Loop restoration params
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct LrParams {
     pub uses_lr: bool,                   // UsesLr
     pub frame_restoration_type: [u8; 3], // FrameRestorationType[]
@@ -332,7 +385,7 @@ pub struct LrParams {
 }
 
 /// Skip mode params
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct SkipModeParams {
     pub skip_mode_frame: [u8; 2], // SkipModeFrame[]
     // skip_mode_params()
@@ -340,7 +393,7 @@ pub struct SkipModeParams {
 }
 
 /// Global motion params
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct GlobalMotionParams {
     pub gm_type: [u8; NUM_REF_FRAMES],              // GmType[]
     pub gm_params: [[i32; 6]; NUM_REF_FRAMES],      // gm_params[]
@@ -350,7 +403,7 @@ pub struct GlobalMotionParams {
 ///
 /// Frame header OBU
 ///
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct FrameHeader {
     // uncompressed_header()
     pub show_existing_frame: bool,                // f(1)
@@ -399,6 +452,7 @@ pub struct FrameHeader {
     pub reference_select: bool,                   // f(1)
     pub allow_warped_motion: bool,                // f(1)
     pub reduced_tx_set: bool,                     // f(1)
+    pub frame_refs_short_signaling: bool,
 }
 
 ///
@@ -422,7 +476,7 @@ pub struct TileListEntry {
 }
 
 /// Film grain synthesis parameters
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct FilmGrainParams {
     pub apply_grain: bool,              // f(1)
     pub grain_seed: u16,                // f(16)
@@ -529,6 +583,17 @@ pub struct TimecodeMetadata {
     pub time_offset_value: u32,    // f(time_offset_length), 5 bits <= 31
 }
 
+pub struct TileGroupObu {
+    pub header_bytes: u32,
+    pub tile_sizes: Vec<u32>,
+}
+
+pub struct FrameObu {
+    pub header_bytes: u32,
+    pub frame_header: FrameHeader,
+    pub tile_group_obu: TileGroupObu,
+}
+
 /// return (MiCols, MiRows)
 fn compute_image_size(fs: &FrameSize) -> (u32, u32) {
     (
@@ -622,7 +687,6 @@ fn parse_color_config<R: io::Read>(
         cc.color_range = true;
         cc.subsampling_x = 0;
         cc.subsampling_y = 0;
-        return Some(cc);
     } else {
         cc.color_range = br.f::<bool>(1)?; // f(1)
         if sh.seq_profile == 0 {
@@ -796,6 +860,15 @@ fn parse_loop_filter_params<R: io::Read>(
     Some(lfp)
 }
 
+// tile_log2: Tile size calculation function
+fn tile_log2(blk_size: u32, target: u32) -> usize {
+    let mut k = 0;
+    while (blk_size << k) < target {
+        k += 1;
+    }
+    k
+}
+
 ///
 /// parse tile_info()
 ///
@@ -805,15 +878,6 @@ fn parse_tile_info<R: io::Read>(
     fs: &FrameSize,
 ) -> Option<TileInfo> {
     let mut ti = TileInfo::default();
-
-    // tile_log2: Tile size calculation function
-    let tile_log2 = |blk_size, target| {
-        let mut k = 0;
-        while (blk_size << k) < target {
-            k += 1;
-        }
-        k
-    };
 
     let (mi_cols, mi_rows) = compute_image_size(fs);
     let sb_cols = if sh.use_128x128_superblock {
@@ -1681,25 +1745,16 @@ pub fn parse_sequence_header<R: io::Read>(bs: &mut R) -> Option<SequenceHeader> 
         sh.op[0].operating_point_idc = 0;
         sh.op[0].seq_level_idx = br.f::<u8>(5)?; // f(5)
         sh.op[0].seq_tier = 0;
-        // decoder_model_present_for_this_op[0] = 0
-        // initial_display_delay_present_for_this_op[0] = 0
-        assert!(true);
+        sh.op[0].decoder_model_present_for_this_op = false;
+        sh.op[0].initial_display_delay_present_for_this_op = false;
     } else {
         sh.timing_info_present_flag = br.f::<bool>(1)?; // f(1)
         if sh.timing_info_present_flag {
             sh.timing_info = parse_timing_info(&mut br)?; // timing_info()
             sh.decoder_model_info_present_flag = br.f::<bool>(1)?; // f(1)
             if sh.decoder_model_info_present_flag {
-                let buffer_delay_length = br.f::<u8>(5)? + 1;
-                let num_units_in_decoding_tick = br.f::<u32>(32)?;
-                let buffer_removal_time = br.f::<u8>(5)? + 1;
-                let frame_presentation_time_length = br.f::<u8>(5)? + 1;
-                sh.decoder_model_info = Some(DecoderModelInfo {
-                    buffer_delay_length,
-                    num_units_in_decoding_tick,
-                    buffer_removal_time,
-                    frame_presentation_time_length,
-                });
+                sh.decoder_model_info = decoder_model_info(&mut br);
+                assert!(sh.decoder_model_info.is_some());
             }
         } else {
             sh.decoder_model_info_present_flag = false;
@@ -1717,15 +1772,17 @@ pub fn parse_sequence_header<R: io::Read>(bs: &mut R) -> Option<SequenceHeader> 
                 sh.op[i].seq_tier = 0;
             }
             if let Some(ref decoder_model_info) = sh.decoder_model_info {
-                if br.f::<bool>(1)? {
-                    let n = decoder_model_info.buffer_delay_length;
-                    let _decoder_delay = br.f::<u32>(n as usize);
-                    let _encoder_delay = br.f::<u32>(n as usize);
-                    let _low_delay_mode = br.f::<bool>(1);
+                sh.op[i].decoder_model_present_for_this_op = br.f::<bool>(1)?; // f(1)
+                if sh.op[i].decoder_model_present_for_this_op {
+                    operating_parameters_info(&mut br, decoder_model_info);
                 }
+            } else {
+                sh.op[i].decoder_model_present_for_this_op = false;
             }
+
             if sh.initial_display_delay_present_flag {
-                if br.f::<bool>(1)? {
+                sh.op[i].initial_display_delay_present_for_this_op = br.f::<bool>(1)?; // f(1)
+                if sh.op[i].initial_display_delay_present_for_this_op {
                     let _delay = br.f::<u8>(4)?;
                 }
             }
@@ -1779,6 +1836,7 @@ pub fn parse_sequence_header<R: io::Read>(bs: &mut R) -> Option<SequenceHeader> 
         } else {
             sh.seq_force_screen_content_tools = br.f::<u8>(1)?; // f(1)
         }
+
         if sh.seq_force_screen_content_tools > 0 {
             let seq_choose_integer_mv = br.f::<u8>(1)?; // f(1)
             if seq_choose_integer_mv > 0 {
@@ -1805,12 +1863,36 @@ pub fn parse_sequence_header<R: io::Read>(bs: &mut R) -> Option<SequenceHeader> 
     Some(sh)
 }
 
+fn operating_parameters_info(
+    br: &mut BitReader<impl io::Read>,
+    decoder_model_info: &DecoderModelInfo,
+) {
+    let n = decoder_model_info.buffer_delay_length;
+    let _decoder_delay = br.f::<u32>(n as usize);
+    let _encoder_delay = br.f::<u32>(n as usize);
+    let _low_delay_mode = br.f::<bool>(1);
+}
+
+fn decoder_model_info(br: &mut BitReader<impl io::Read>) -> Option<DecoderModelInfo> {
+    let buffer_delay_length = br.f::<u8>(5)? + 1;
+    let num_units_in_decoding_tick = br.f::<u32>(32)?;
+    let buffer_removal_time_length = br.f::<u8>(5)? + 1;
+    let frame_presentation_time_length = br.f::<u8>(5)? + 1;
+    Some(DecoderModelInfo {
+        buffer_delay_length,
+        num_units_in_decoding_tick,
+        buffer_removal_time_length,
+        frame_presentation_time_length,
+    })
+}
+
 ///
 /// parse frame_header
 ///
 pub fn parse_frame_header<R: io::Read>(
     bs: &mut R,
     sh: &SequenceHeader,
+    oh: &Obu,
     rfman: &mut av1::RefFrameManager,
 ) -> Option<FrameHeader> {
     let mut br = BitReader::new(bs);
@@ -1822,29 +1904,29 @@ pub fn parse_frame_header<R: io::Read>(
     } else {
         0
     } as usize;
-    assert!(id_len <= 16);
-    assert!(NUM_REF_FRAMES <= 8);
-    let all_frames = ((1usize << NUM_REF_FRAMES) - 1) as u8; // 0xff
+    // OK
+    assert!(id_len <= 16); // Not in spec
+    let all_frames = ((1usize << NUM_REF_FRAMES) - 1) as u8;
+    // OK
     if sh.reduced_still_picture_header {
         fh.show_existing_frame = false;
         fh.frame_type = KEY_FRAME;
         fh.frame_is_intra = true;
         fh.show_frame = true;
         fh.showable_frame = false;
+        // OK
     } else {
         fh.show_existing_frame = br.f::<bool>(1)?; // f(1)
         if fh.show_existing_frame {
             fh.frame_to_show_map_idx = br.f::<u8>(3)?; // f(3)
             if sh.decoder_model_info_present_flag && !sh.timing_info.equal_picture_interval {
-                if let Some(ref decoder_model_info) = sh.decoder_model_info {
-                    let _frame_presentation_time =
-                        br.f::<u32>(decoder_model_info.frame_presentation_time_length as usize)?;
-                }
+                temporal_point_info(&mut br, sh);
             }
             fh.refresh_frame_flags = 0;
             if sh.frame_id_numbers_present_flag {
                 fh.display_frame_id = br.f::<u16>(id_len)?; // f(idLen)
             }
+            // OK
             fh.frame_type = rfman.ref_frame_type[fh.frame_to_show_map_idx as usize];
             if fh.frame_type == KEY_FRAME {
                 fh.refresh_frame_flags = all_frames;
@@ -1854,6 +1936,7 @@ pub fn parse_frame_header<R: io::Read>(
             }
             return Some(fh);
         }
+        // OK
         fh.frame_type = br.f::<u8>(2)?; // f(2)
         fh.frame_is_intra = fh.frame_type == INTRA_ONLY_FRAME || fh.frame_type == KEY_FRAME;
         fh.show_frame = br.f::<bool>(1)?; // f(1)
@@ -1861,22 +1944,22 @@ pub fn parse_frame_header<R: io::Read>(
             && sh.decoder_model_info_present_flag
             && !sh.timing_info.equal_picture_interval
         {
-            if let Some(ref decoder_model_info) = sh.decoder_model_info {
-                let _frame_presentation_time =
-                    br.f::<u32>(decoder_model_info.frame_presentation_time_length as usize)?;
-            }
+            temporal_point_info(&mut br, sh);
         }
+        // OK
         if fh.show_frame {
             fh.showable_frame = fh.frame_type != KEY_FRAME;
         } else {
             fh.showable_frame = br.f::<bool>(1)?; // f(1)
         }
+        // OK
         if fh.frame_type == SWITCH_FRAME || (fh.frame_type == KEY_FRAME && fh.show_frame) {
             fh.error_resilient_mode = true;
         } else {
             fh.error_resilient_mode = br.f::<bool>(1)?; // f(1)
         }
     }
+    // OK
     if fh.frame_type == KEY_FRAME && fh.show_frame {
         for i in 0..NUM_REF_FRAMES {
             rfman.ref_valid[i] = false;
@@ -1886,12 +1969,15 @@ pub fn parse_frame_header<R: io::Read>(
             fh.order_hints[LAST_FRAME + i] = 0;
         }
     }
+    // OK
     fh.disable_cdf_update = br.f::<bool>(1)?; // f(1)
+
     if sh.seq_force_screen_content_tools == SELECT_SCREEN_CONTENT_TOOLS {
         fh.allow_screen_content_tools = br.f::<bool>(1)?; // f(1)
     } else {
         fh.allow_screen_content_tools = sh.seq_force_screen_content_tools != 0;
     }
+    // OK
     if fh.allow_screen_content_tools {
         if sh.seq_force_integer_mv == SELECT_INTEGER_MV {
             fh.force_integer_mv = br.f::<bool>(1)?; // f(1)
@@ -1901,9 +1987,11 @@ pub fn parse_frame_header<R: io::Read>(
     } else {
         fh.force_integer_mv = false;
     }
+    // OK
     if fh.frame_is_intra {
         fh.force_integer_mv = true;
     }
+
     if sh.frame_id_numbers_present_flag {
         let _prev_frame_id = fh.current_frame_id;
         fh.current_frame_id = br.f::<u16>(id_len)?; // f(idLen)
@@ -1911,6 +1999,7 @@ pub fn parse_frame_header<R: io::Read>(
     } else {
         fh.current_frame_id = 0;
     }
+    // OK
     if fh.frame_type == SWITCH_FRAME {
         fh.frame_size_override_flag = true;
     } else if sh.reduced_still_picture_header {
@@ -1918,11 +2007,31 @@ pub fn parse_frame_header<R: io::Read>(
     } else {
         fh.frame_size_override_flag = br.f::<bool>(1)?; // f(1)
     }
+    // OK
     fh.order_hint = br.f::<u8>(sh.order_hint_bits as usize)?; // f(OrderHintBits)
+
     if fh.frame_is_intra || fh.error_resilient_mode {
         fh.primary_ref_frame = PRIMARY_REF_NONE;
     } else {
         fh.primary_ref_frame = br.f::<u8>(3)?; // f(3)
+    }
+    // OK
+    if sh.decoder_model_info_present_flag {
+        let buffer_removal_time_present_flag = br.f::<bool>(1)?; // f(1)
+        if buffer_removal_time_present_flag {
+            for i in 0..sh.operating_points_cnt {
+                if sh.op[i as usize].decoder_model_present_for_this_op {
+                    let op_pt_idc = sh.op[i as usize].operating_point_idc;
+                    let in_temporal_layer = (op_pt_idc >> oh.temporal_id) & 1;
+                    let in_spatial_layer = (op_pt_idc >> (oh.spatial_id + 8)) & 1;
+                    if op_pt_idc == 0 || (in_temporal_layer != 0 && in_spatial_layer != 0) {
+                        let _buffer_removal_time = br.f::<u32>(
+                            sh.decoder_model_info.unwrap().buffer_removal_time_length as usize,
+                        )?;
+                    }
+                }
+            }
+        }
     }
     fh.allow_high_precision_mv = false;
     fh.use_ref_frame_mvs = false;
@@ -1932,6 +2041,7 @@ pub fn parse_frame_header<R: io::Read>(
     } else {
         fh.refresh_frame_flags = br.f::<u8>(8)?; // f(8)
     }
+
     if !fh.frame_is_intra || fh.refresh_frame_flags != all_frames {
         if fh.error_resilient_mode && sh.enable_order_hint {
             for i in 0..NUM_REF_FRAMES {
@@ -1942,7 +2052,8 @@ pub fn parse_frame_header<R: io::Read>(
             }
         }
     }
-    if fh.frame_type == KEY_FRAME {
+
+    if fh.frame_is_intra {
         fh.frame_size = parse_frame_size(&mut br, sh, &fh)?; // frame_size()
         fh.render_size = parse_render_size(&mut br, &fh.frame_size)?; // render_size()
         if fh.allow_screen_content_tools
@@ -1951,88 +2062,72 @@ pub fn parse_frame_header<R: io::Read>(
             fh.allow_intrabc = br.f::<bool>(1)?; // f(1)
         }
     } else {
-        if fh.frame_type == INTRA_ONLY_FRAME {
-            fh.frame_size = parse_frame_size(&mut br, sh, &fh)?; // frame_size()
-            fh.render_size = parse_render_size(&mut br, &fh.frame_size)?; // render_size()
-            if fh.allow_screen_content_tools
-                && fh.frame_size.upscaled_width == fh.frame_size.frame_width
-            {
-                fh.allow_intrabc = br.f::<bool>(1)?; // f(1)
-            }
+        if !sh.enable_order_hint {
+            fh.frame_refs_short_signaling = false;
         } else {
-            let frame_refs_short_signaling;
-            if !sh.enable_order_hint {
-                frame_refs_short_signaling = false;
-            } else {
-                frame_refs_short_signaling = br.f::<bool>(1)?; // f(1)
-                if frame_refs_short_signaling {
-                    fh.last_frame_idx = br.f::<u8>(3)?; // f(3)
-                    fh.gold_frame_idx = br.f::<u8>(3)?; // f(3)
-                    unimplemented!("set_frame_refs()");
-                }
-            }
-            for i in 0..REFS_PER_FRAME {
-                if !frame_refs_short_signaling {
-                    fh.ref_frame_idx[i] = br.f::<u8>(3)?; // f(3)
-
-                    // ref_frame_idx[i] specifies which reference frames are used by inter frames.
-                    // It is a requirement of bitstream conformance that RefValid[ref_frame_idx[i]] is equal to 1,
-                    // and that the selected reference frames match the current frame in bit depth, profile,
-                    // chroma subsampling, and color space.
-                    assert!(rfman.ref_valid[fh.ref_frame_idx[i] as usize]);
-                }
-                if sh.frame_id_numbers_present_flag {
-                    let delta_frame_id = br.f::<u16>(sh.delta_frame_id_length as usize)? + 1; // f(n)
-                    let expected_frame_id =
-                        (fh.current_frame_id + (1 << id_len) - delta_frame_id) % (1 << id_len);
-
-                    // expectedFrameId[i] specifies the frame id for each frame used for reference.
-                    // It is a requirement of bitstream conformance that whenever expectedFrameId[i] is calculated,
-                    // the value matches RefFrameId[ref_frame_idx[i]] (this contains the value of current_frame_id
-                    // at the time that the frame indexed by ref_frame_idx was stored).
-                    assert_eq!(
-                        expected_frame_id,
-                        rfman.ref_frame_id[fh.ref_frame_idx[i] as usize]
-                    );
-                }
-            }
-            if fh.frame_size_override_flag && !fh.error_resilient_mode {
-                unimplemented!("frame_size_with_refs()");
-            } else {
-                fh.frame_size = parse_frame_size(&mut br, sh, &fh)?; // frame_size()
-                fh.render_size = parse_render_size(&mut br, &fh.frame_size)?; // render_size()
-            }
-            if fh.force_integer_mv {
-                fh.allow_high_precision_mv = false;
-            } else {
-                fh.allow_high_precision_mv = br.f::<bool>(1)?; // f(1)
-            }
-            fh.interpolation_filter = read_interpolation_filter(&mut br)?; // read_interpolation_filter()
-            fh.is_motion_mode_switchable = br.f::<bool>(1)?; // f(1)
-            if fh.error_resilient_mode || !sh.enable_ref_frame_mvs {
-                fh.use_ref_frame_mvs = false;
-            } else {
-                fh.use_ref_frame_mvs = br.f::<bool>(1)?; // f(1)
+            fh.frame_refs_short_signaling = br.f::<bool>(1)?; // f(1)
+            if fh.frame_refs_short_signaling {
+                fh.last_frame_idx = br.f::<u8>(3)?; // f(3)
+                fh.gold_frame_idx = br.f::<u8>(3)?; // f(3)
+                unimplemented!("set_frame_refs()");
             }
         }
-    }
-    if !fh.frame_is_intra {
+        for i in 0..REFS_PER_FRAME {
+            if !fh.frame_refs_short_signaling {
+                fh.ref_frame_idx[i] = br.f::<u8>(3)?; // f(3)
+            }
+
+            if sh.frame_id_numbers_present_flag {
+                let n = sh.delta_frame_id_length;
+                let delta_frame_id = br.f::<u16>(n as usize)? + 1; // f(n)
+                let expected_frame_id =
+                    (fh.current_frame_id + (1 << id_len) - delta_frame_id) % (1 << id_len);
+            }
+        }
+
+        if fh.frame_size_override_flag && !fh.error_resilient_mode {
+            unimplemented!("frame_size_with_refs()");
+        } else {
+            fh.frame_size = parse_frame_size(&mut br, sh, &fh)?; // frame_size()
+            fh.render_size = parse_render_size(&mut br, &fh.frame_size)?; // render_size()
+        }
+
+        if fh.force_integer_mv {
+            fh.allow_high_precision_mv = false;
+        } else {
+            fh.allow_high_precision_mv = br.f::<bool>(1)?; // f(1)
+        }
+
+        fh.interpolation_filter = read_interpolation_filter(&mut br)?;
+
+        fh.is_motion_mode_switchable = br.f::<bool>(1)?; // f(1)
+
+        if fh.error_resilient_mode || !sh.enable_ref_frame_mvs {
+            fh.use_ref_frame_mvs = false;
+        } else {
+            fh.use_ref_frame_mvs = br.f::<bool>(1)?; // f(1)
+        }
+
         for i in 0..REFS_PER_FRAME {
             let ref_frame = LAST_FRAME + i;
             let hint = rfman.ref_order_hint[fh.ref_frame_idx[i] as usize];
             fh.order_hints[ref_frame] = hint;
             if sh.enable_order_hint {
+                // TODO:
                 // RefFrameSignBias[refFrame] = 0
             } else {
+                // TODO:
                 // RefFrameSignBias[refFrame] = get_relative_dist(hint, OrderHint) > 0
             }
         }
     }
+
     if sh.reduced_still_picture_header || fh.disable_cdf_update {
         fh.disable_frame_end_update_cdf = true;
     } else {
         fh.disable_frame_end_update_cdf = br.f::<bool>(1)?; // f(1)
     }
+
     if fh.primary_ref_frame == PRIMARY_REF_NONE {
         // init_non_coeff_cdfs()
         setup_past_independence(&mut fh);
@@ -2040,23 +2135,25 @@ pub fn parse_frame_header<R: io::Read>(
         // load_cdfs(ref_frame_idx[primary_ref_frame])
         load_previous(&mut fh, rfman);
     }
+
     if fh.use_ref_frame_mvs {
-        // motion_field_estimation()
+        motion_field_estimation();
     }
     fh.tile_info = parse_tile_info(&mut br, sh, &fh.frame_size)?; // tile_info()
     fh.quantization_params = parse_quantization_params(&mut br, &sh.color_config)?; // quantization_params()
     fh.segmentation_params = parse_segmentation_params(&mut br, &fh)?; // segmentation_params()
     fh.delta_q_params = parse_delta_q_params(&mut br, &fh.quantization_params)?; // delta_q_params()
     fh.delta_lf_params = parse_delta_lf_params(&mut br, &fh)?; // delta_lf_params()
+
     if fh.primary_ref_frame == PRIMARY_REF_NONE {
         // init_coeff_cdfs()
     } else {
         // load_previous_segment_ids()
     }
-    fh.coded_lossless = false; // FIXME: assume lossy coding
+
+    fh.coded_lossless = true; // FIXME: assume lossy coding
     for _segment_id in 0..MAX_SEGMENTS {
-        // CodedLossless
-        // SegQMLevel[][segmentId]
+        // let q_index = get_q_index();
     }
     fh.all_lossless =
         fh.coded_lossless && (fh.frame_size.frame_width == fh.frame_size.upscaled_width);
@@ -2064,15 +2161,10 @@ pub fn parse_frame_header<R: io::Read>(
     fh.cdef_params = parse_cdef_params(&mut br, sh, &fh)?; // cdef_params()
     fh.lr_params = parse_lr_params(&mut br, sh, &fh)?; // lr_params()
     fh.tx_mode = read_tx_mode(&mut br, &fh)?; // read_tx_mode()
-    {
-        // frame_reference_mode()
-        if fh.frame_is_intra {
-            fh.reference_select = false;
-        } else {
-            fh.reference_select = br.f::<bool>(1)?; // f(1)
-        }
-    }
+
+    frame_reference_mode(&mut br, &fh)?;
     fh.skip_mode_params = parse_skip_mode_params(&mut br, sh, &fh, rfman)?; // skip_mode_params()
+
     if fh.frame_is_intra || fh.error_resilient_mode || !sh.enable_warped_motion {
         fh.allow_warped_motion = false;
     } else {
@@ -2083,6 +2175,57 @@ pub fn parse_frame_header<R: io::Read>(
     fh.film_grain_params = parse_film_grain_params(&mut br, sh, &fh)?; // film_grain_params()
 
     Some(fh)
+}
+
+fn clip3(x: u32, y: u32, z: u32) -> u32 {
+    if z < x {
+        return x;
+    } else if z > y {
+        return y;
+    }
+    return z;
+}
+
+// fn get_q_index(ignore_delta_q: bool, segment_id: u32) -> u32 {
+//     //• If seg_feature_active_idx( segmentId, SEG_LVL_ALT_Q ) is equal to 1 the following ordered steps apply:
+//     if seg_feature_active_idx(segment_id, SEG_LEVEL_ALT_Q) == 1 {
+//         let data = feature_data[segment_id][SEG_LVL_ALT_Q];
+//         let mut q_index = base_q_idx + data;
+//         if !ignore_delta_q && delta_q_present {
+//             q_index = current_q_index + data;
+//         }
+
+//         return clip3(0, 255, q_index);
+//     }
+
+//     if !ignore_delta_q && delta_q_present {
+//         return current_q_index;
+//     }
+
+//     return base_q_index;
+
+//     //• Otherwise, if ignoreDeltaQ is equal to 0 and delta_q_present is equal to 1, return CurrentQIndex.
+//     //• Otherwise, return base_q_idx.
+// }
+
+fn motion_field_estimation() {
+    println!("motion_field_estimation() not implemented");
+}
+
+fn frame_reference_mode(br: &mut BitReader<impl io::Read>, fh: &FrameHeader) -> Option<bool> {
+    if fh.frame_is_intra {
+        Some(false)
+    } else {
+        br.f::<bool>(1)
+    }
+}
+
+fn temporal_point_info(br: &mut BitReader<impl io::Read>, sh: &SequenceHeader) -> Option<u32> {
+    let Some(ref decoder_model_info) = sh.decoder_model_info else {
+        panic!("Shouldn't call temporal_point_info() without decoder_model_info");
+    };
+
+    br.f::<u32>(decoder_model_info.frame_presentation_time_length as usize)
 }
 
 ///
@@ -2296,4 +2439,133 @@ fn parse_timecode_metadata<R: io::Read>(br: &mut BitReader<R>) -> Option<Metadat
     }
 
     Some(MetadataObu::Timecode(meta))
+}
+
+pub fn parse_tile_group_obu<R: io::Read + Seek>(
+    bs: &mut R,
+    frame_header: FrameHeader,
+    mut sz: u32,
+) -> io::Result<TileGroupObu> {
+    let mut br = BitReader::new(bs);
+
+    let num_tiles = frame_header.tile_info.tile_cols * frame_header.tile_info.tile_rows;
+
+    let start_bit_pos = 0;
+    let tile_start_and_end_present_flag = if num_tiles > 1 {
+        br.f::<u32>(1).unwrap()
+    } else {
+        0
+    };
+
+    let (tg_start, tg_end) = if num_tiles == 1 || tile_start_and_end_present_flag == 0 {
+        (0, num_tiles - 1)
+    } else {
+        let tile_bits = tile_log2(1, frame_header.tile_info.tile_cols as u32)
+            + tile_log2(1, frame_header.tile_info.tile_rows as u32);
+        let tg_start = br.f(tile_bits).unwrap();
+        let tg_end = br.f(tile_bits).unwrap();
+        (tg_start, tg_end)
+    };
+
+    byte_alignment(&mut br);
+    let end_bit_pos = br.get_position();
+    let mut header_bytes = (end_bit_pos - start_bit_pos) / 8;
+    sz -= header_bytes as u32;
+
+    let mut tile_sizes = Vec::new();
+
+    for tile_num in tg_start..=tg_end {
+        let _tile_row = tile_num / frame_header.tile_info.tile_cols;
+        let _tile_col = tile_num % frame_header.tile_info.tile_cols;
+        let last_tile = tile_num == tg_end;
+
+        let tile_size = if last_tile {
+            sz
+        } else {
+            let tile_size_minus_1: u32 = br.le(frame_header.tile_info.tile_size_bytes).unwrap();
+            let tile_size = tile_size_minus_1 + 1;
+            sz -= tile_size + frame_header.tile_info.tile_size_bytes as u32;
+            tile_size
+        };
+
+        tile_sizes.push(tile_size);
+
+        // TODO: Feels like some sort of byte alignment is needed here because of the tile_size -1 above
+
+        // Skip these and read to the end
+        let _ = br.skip((tile_size * 8) as usize);
+
+        // MiRowStart = MiRowStarts[ tileRow ]
+        // MiRowEnd = MiRowStarts[ tileRow + 1 ]
+        // MiColStart = MiColStarts[ tileCol ]
+        // MiColEnd = MiColStarts[ tileCol + 1 ]
+        // CurrentQIndex = base_q_idx
+        // init_symbol( tileSize )
+        // decode_tile( )
+        // exit_symbol( )
+    }
+
+    Ok(TileGroupObu {
+        tile_sizes,
+        header_bytes: header_bytes as u32,
+    })
+}
+
+fn byte_alignment(br: &mut BitReader<impl io::Read>) {
+    while br.get_position() & 7 != 0 {
+        br.f::<u32>(1);
+    }
+}
+
+pub fn parse_frame_header_outer<R: io::Read + Seek>(
+    bs: &mut R,
+    sh: &SequenceHeader,
+    oh: &Obu,
+) -> io::Result<FrameHeader> {
+    let start_byte_pos = bs.stream_position()?;
+
+    let mut rfman = av1::RefFrameManager::new();
+    let frame_header = parse_frame_header(bs, sh, oh, &mut rfman).ok_or_else(|| {
+        io::Error::new(io::ErrorKind::InvalidData, "Failed to parse frame header")
+    })?;
+
+    let end_byte_pos = bs.stream_position()?;
+    let header_bytes = (end_byte_pos - start_byte_pos) as u32;
+
+    println!("Frame header size: {} bytes", header_bytes);
+
+    Ok(frame_header)
+}
+
+pub fn parse_frame_obu<R: io::Read + Seek>(
+    bs: &mut R,
+    sh: &SequenceHeader,
+    fh: &Option<FrameHeader>,
+    oh: &Obu,
+    mut sz: u32,
+) -> io::Result<FrameObu> {
+    let start_byte_pos = bs.stream_position()?;
+    // debug_assert!(start_byte_pos == 0);
+
+    let frame_header = if let Some(frame_header) = fh {
+        frame_header.clone()
+    } else {
+        parse_frame_header_outer(bs, sh, oh).unwrap()
+    };
+
+    // No need for byte alignment here as bitstream created and dropped in frame_header
+    let end_byte_pos = bs.stream_position()?;
+
+    // Specification uses bits and divides by 8 here
+    let header_bytes = (end_byte_pos - start_byte_pos) as u32;
+
+    sz -= header_bytes;
+
+    let tile_group_obu = parse_tile_group_obu(bs, frame_header.clone(), sz)?;
+
+    Ok(FrameObu {
+        frame_header,
+        tile_group_obu,
+        header_bytes,
+    })
 }

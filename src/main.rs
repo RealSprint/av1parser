@@ -52,7 +52,7 @@ fn process_obu<R: io::Read>(
                 return;
             }
             if let Some(fh) =
-                obu::parse_frame_header(reader, seq.sh.as_ref().unwrap(), &mut seq.rfman)
+                obu::parse_frame_header(reader, seq.sh.as_ref().unwrap(), obu, &mut seq.rfman)
             {
                 if !fh.show_existing_frame {
                     let error_resilient = if fh.error_resilient_mode { "*" } else { "" };

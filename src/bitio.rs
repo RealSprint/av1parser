@@ -34,6 +34,7 @@ pub struct BitReader<R> {
     inner: R,
     bbuf: u8,
     bpos: u8,
+    pos: usize, // current bit position
 }
 
 impl<R: io::Read> BitReader<R> {
@@ -42,7 +43,12 @@ impl<R: io::Read> BitReader<R> {
             inner,
             bbuf: 0,
             bpos: 0,
+            pos: 0,
         }
+    }
+
+    pub fn get_position(&self) -> usize {
+        self.pos
     }
 
     /// read_bit: read 1 bit
@@ -57,7 +63,17 @@ impl<R: io::Read> BitReader<R> {
             self.bpos = 8;
         }
         self.bpos -= 1;
+        self.pos += 1;
         Some((self.bbuf >> self.bpos) & 1)
+    }
+
+    pub fn skip(&mut self, n: usize) -> Option<()> {
+        for _ in 0..n {
+            if self.read_bit().is_none() {
+                return None; // EOF
+            }
+        }
+        Some(())
     }
 
     /// f(n): read n-bits
@@ -109,6 +125,15 @@ impl<R: io::Read> BitReader<R> {
         let value = self.f::<u64>(leading_zeros as usize)?;
 
         Some(value + (1 << leading_zeros) - 1)
+    }
+
+    pub fn le<T: FromU32>(&mut self, n: usize) -> Option<T> {
+        let mut t = 0;
+        for i in 0..n {
+            let byte: u32 = self.f(8).unwrap();
+            t += byte << (i * 8)
+        }
+        return Some(FromU32::from_u32(t));
     }
 
     // FloorLog2(x)
